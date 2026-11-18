@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbit: Satellite Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--pn:#101a2a;--ln:#24344c;--tx:#e8eef7;--mu:#93a6bf;--ac:#ffb454;--in:#182539;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--pn:#f3f6fa;--ln:#cbd6e4;--tx:#14202f;--mu:#52647c;--ac:#a85a00;--in:#fff;color-scheme:light}}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;height:100%;background:var(--pn);color:var(--tx);font:15px/1.45 "IBM Plex Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;height:100%}
+.stage{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0a111c}
+.glw{position:relative;flex:1;min-height:0}
+#gl{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+.hint{position:absolute;left:14px;bottom:10px;font-size:12px;color:#93a6bf;pointer-events:none}
+#map{width:100%;height:190px;display:block;border-top:1px solid #24344c}
+aside{overflow-y:auto;padding:18px 20px 28px;border-left:1px solid var(--ln)}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:15px;margin:22px 0 8px}
+p.s{margin:0;color:var(--mu);font-size:12.5px}
+section{border-top:1px solid var(--ln);margin-top:18px;padding-top:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 8px}
+button,select,input[type=number],input[type=text]{font:inherit;color:var(--tx);background:var(--in);border:1px solid var(--ln);border-radius:6px;padding:6px 10px}
+button{cursor:pointer}button:hover{border-color:var(--ac)}button:disabled{opacity:.5;cursor:default}
+.chip{display:flex;align-items:center;gap:6px}.chip i{width:9px;height:9px;border-radius:50%}
+.chip[aria-pressed=true]{border-color:var(--ac);background:color-mix(in srgb,var(--ac) 16%,var(--in))}
+.add{display:flex;gap:6px}.add select{flex:1}
+.r{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin:10px 0}.r input{grid-column:1/-1;width:100%;accent-color:var(--ac)}
+.r output{color:var(--ac);font-weight:600}
+dl{display:grid;grid-template-columns:1fr auto;gap:5px 10px;margin:0}dt{color:var(--mu)}dd{margin:0;text-align:right;font-weight:600}
+.f{display:flex;gap:6px;margin:8px 0}.f input{flex:1;min-width:0}
+.out{font-size:13px;color:var(--mu);min-height:20px;margin:6px 0}
+#slog{font-size:13px;max-height:150px;overflow-y:auto;margin:6px 0;padding:0;list-style:none}
+#chat{font-size:13.5px;max-height:240px;overflow-y:auto;margin:8px 0}
+#slog li,#chat div{padding:4px 0;border-bottom:1px solid var(--ln)}
+#chat .u{color:var(--ac)}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+@media (max-width:860px){body{height:auto}main{display:block;height:auto}.glw{height:56vh;flex:none}aside{border-left:0}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style></head><body>
+<main>
+<div class="stage"><div class="glw"><canvas id="gl" aria-label="3D view of orbits around Earth"></canvas><div class="hint">Drag to rotate. Scroll or pinch to zoom.</div></div>
+<canvas id="map" aria-label="Ground tracks map"></canvas></div>
+<aside>
+<h1>Orbit</h1>
+<p class="s">Two-body model. Earth radius 6,371 km, μ = 398,600.4418 km³/s². Simulation time: <b id="tT">0:00:00</b></p>
+<div class="chips" id="chips" role="group" aria-label="Satellites"></div>
+<div class="add"><select id="pre" aria-label="Preset orbit"></select><button id="add">Add</button><button id="del">Remove</button></div>
+
+<section><h2>Selected satellite</h2>
+<div class="r"><label for="ra">Mean altitude, km</label><output id="oa"></output><input type="range" id="ra" min="0" max="1000"></div>
+<div class="r"><label for="ri">Inclination, °</label><output id="oi"></output><input type="range" id="ri" min="0" max="180" step="0.1"></div>
+<div class="r"><label for="re">Eccentricity</label><output id="oe"></output><input type="range" id="re" min="0" max="750"></div>
+<div class="r"><label for="rs">Simulation speed</label><output id="os"></output><input type="range" id="rs" min="0" max="1000"></div>
+<button id="pz">Pause</button></section>
+
+<section><h2>Telemetry</h2>
+<dl><dt>Current altitude</dt><dd id="tAlt"></dd><dt>Velocity</dt><dd id="tV"></dd><dt>Period</dt><dd id="tP"></dd><dt>Latitude / longitude</dt><dd id="tG"></dd><dt>Lighting</dt><dd id="tSun"></dd>
+<dt><select id="stSel" aria-label="Ground station"></select></dt><dd id="tPass"></dd></dl></section>
+
+<section><h2>Hohmann transfer</h2>
+<p class="s">Circular orbits only. The burn is applied instantly, which is a simplification.</p>
+<div class="f"><input type="number" id="mh" value="1200" min="200" max="40000" aria-label="Target altitude, km"><button id="mc">Calculate</button><button id="mg">Apply</button></div>
+<div class="out" id="mo"></div></section>
+
+<section><h2>Onboard AI scanner</h2>
+<p class="s">Simulated: a camera with a 25° field of view looks for targets on the ground and scores its recognition confidence. Targets are random and no real neural network runs here.</p>
+<label><input type="checkbox" id="scan"> Enable on selected satellite</label>
+<div class="out" id="sinfo"></div><ul id="slog"></ul></section>
+
+<section><h2>Orbit assistant</h2>
+<p class="s" id="ai">AI: connecting…</p>
+<div id="chat" aria-live="polite"></div>
+<form class="f" id="cf"><input type="text" id="cq" placeholder="Ask or command…" aria-label="Message"><button id="cb">Send</button></form></section>
+</aside></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=i=>document.getElementById(i),F=(x,d=1)=>x.toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});
+const R=6371,MU=398600.4418,W=7.2921159e-5,D=Math.PI/180,TP=Math.PI*2;
+const COL=['#ffb454','#6ee7d8','#c4a1ff','#ff7a90','#9bd36a','#7cc0ff'];
+const PRE={ISS:[420,51.6,.0005],GPS:[20180,55,.01],GEO:[35786,0,0],SSO:[700,98.2,0],Molniya:[20190,63.4,.72]};
+const ST=[['Baikonur',45.96,63.3],['Svalbard',78.2,15.4],['Singapore',1.35,103.8],['Cape Town',-33.9,18.4]];
+ST.forEach(s=>{const a=s[1]*D,o=s[2]*D;s.u=[Math.cos(a)*Math.cos(o),Math.cos(a)*Math.sin(o),Math.sin(a)]});
+const TY=[['fire','#ff7a5c'],['ship','#7cc0ff'],['flood','#6ee7d8']];
+let T=0,spd=100,paused=false,sel=0,scan=false,stI=0,pass=null,pT=-1e9,sample=null;
+const sats=[];
+
+/* ---- orbital mechanics ---- */
+function rot(s,x,y){const co=Math.cos(s.raan*D),so=Math.sin(s.raan*D),cw=Math.cos(s.w*D),sw=Math.sin(s.w*D),ci=Math.cos(s.inc*D),si=Math.sin(s.inc*D);
+return[x*(co*cw-so*sw*ci)-y*(co*sw+so*cw*ci),x*(so*cw+co*sw*ci)-y*(so*sw-co*cw*ci),x*sw*si+y*cw*si]}
+function pe(s,E){const a=R+s.alt;return rot(s,a*(Math.cos(E)-s.e),a*Math.sqrt(1-s.e*s.e)*Math.sin(E))}
+function nn(s){return Math.sqrt(MU/(R+s.alt)**3)}
+function pos(s,t){const a=R+s.alt,e=s.e,M=(((s.M0+nn(s)*t)%TP)+TP)%TP;let E=M;for(let k=0;k<8;k++)E-=(E-e*Math.sin(E)-M)/(1-e*Math.cos(E));
+const p=pe(s,E),r=Math.hypot(p[0],p[1],p[2]);return{p,r,v:Math.sqrt(MU*(2/r-1/a))}}
+function ecef(p,t){const th=W*t,c=Math.cos(th),s=Math.sin(th);return[p[0]*c+p[1]*s,-p[0]*s+p[1]*c,p[2]]}
+function geo(g,t){const e=ecef(g.p,t);return{lat:Math.asin(g.p[2]/g.r)/D,lon:Math.atan2(e[1],e[0])/D,e}}
+function shadow(p){const d=p[0],r2=p[0]**2+p[1]**2+p[2]**2;return d<0&&Math.sqrt(r2-d*d)<R}
+function swath(alt){const x=(R+alt)/R*Math.sin(25*D);return Math.asin(Math.min(1,x))-25*D}
+function nextPass(s,u){for(let t=T;t<T+86400;t+=20){const e=ecef(pos(s,t).p,t),d=[e[0]-R*u[0],e[1]-R*u[1],e[2]-R*u[2]];
+const el=Math.asin((d[0]*u[0]+d[1]*u[1]+d[2]*u[2])/Math.hypot(d[0],d[1],d[2]))/D;if(el>=10)return t-T}return null}
+function hoh(r1,r2){const k=Math.sqrt(2*r2/(r1+r2)),k2=Math.sqrt(2*r1/(r1+r2));
+const a=Math.sqrt(MU/r1)*(k-1),b=Math.sqrt(MU/r2)*(1-k2);return{dv:(Math.abs(a)+Math.abs(b))*1000,t:Math.PI*Math.sqrt(((r1+r2)/2)**3/MU)}}
+function fmt(t){t=Math.round(t);return Math.floor(t/3600)+':'+String(Math.floor(t%3600/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')}
+function dur(t){const h=Math.floor(t/3600),m=Math.round(t%3600/60);return h?h+' h '+m+' min':m+' min'}
+
+/* ---- scene ---- */
+const cv=$('gl'),rd=new THREE.WebGLRenderer({canvas:cv,antialias:true}),sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(45,1,.01,100);
+sc.background=new THREE.Color(0x0a111c);
+const tc=document.createElement('canvas');tc.width=1024;tc.height=512;const g2=tc.getContext('2d');
+g2.fillStyle='#173250';g2.fillRect(0,0,1024,512);g2.strokeStyle='rgba(150,190,230,.35)';
+for(let i=0;i<=12;i++){g2.beginPath();g2.moveTo(i*1024/12,0);g2.lineTo(i*1024/12,512);g2.stroke()}
+for(let i=0;i<=6;i++){g2.strokeStyle=i==3?'rgba(255,180,84,.7)':'rgba(150,190,230,.35)';g2.beginPath();g2.moveTo(0,i*512/6);g2.lineTo(1024,i*512/6);g2.stroke()}
+const earth=new THREE.Mesh(new THREE.SphereGeometry(1,64,48),new THREE.MeshLambertMaterial({map:new THREE.CanvasTexture(tc)}));sc.add(earth);
+sc.add(new THREE.Mesh(new THREE.SphereGeometry(1.025,48,32),new THREE.MeshBasicMaterial({color:0x4a90d9,transparent:true,opacity:.13,side:THREE.BackSide})));
+const sun=new THREE.DirectionalLight(0xfff2dd,1.15);sun.position.set(5,0,0);sc.add(sun,new THREE.AmbientLight(0x6f86a8,.5));
+ST.forEach(s=>{const a=s[1]*D,o=s[2]*D,m=new THREE.Mesh(new THREE.SphereGeometry(.014,8,6),new THREE.MeshBasicMaterial({color:0xffffff}));
+m.position.set(Math.cos(a)*Math.cos(o),Math.sin(a),-Math.cos(a)*Math.sin(o));earth.add(m)});
+
+function fix(s){const a=[];for(let k=0;k<=180;k++){const p=pe(s,k/180*TP);a.push(p[0]/R,p[2]/R,-p[1]/R)}s.l.geometry.setAttribute('position',new THREE.Float32BufferAttribute(a,3))}
+function mk(n,alt,inc,e){let k=n,c=1;while(sats.some(s=>s.n==k))k=n+' '+(++c);
+const s={n:k,alt,inc,e,raan:0,w:0,M0:Math.random()*TP,col:COL[sats.length%6]};
+s.m=new THREE.Mesh(new THREE.SphereGeometry(.02,12,8),new THREE.MeshBasicMaterial({color:s.col}));
+s.l=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:s.col,transparent:true,opacity:.55}));s.l.frustumCulled=false;
+sc.add(s.m,s.l);sats.push(s);fix(s);return s}
+function setEl(s,o){const Mc=s.M0+nn(s)*T;Object.assign(s,o);s.alt=Math.max(200,Math.min(40000,s.alt));s.e=Math.max(0,Math.min(s.e,.75,1-(R+160)/(R+s.alt)));s.M0=Mc-nn(s)*T;fix(s);pT=-1e9}
+
+let az=.8,el=.45,dist=3.4;const ps=new Map();let pd=0;const cl=d=>Math.max(1.4,Math.min(14,d));
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ps.set(e.pointerId,[e.clientX,e.clientY])});
+cv.addEventListener('pointermove',e=>{if(!ps.has(e.pointerId))return;const o=ps.get(e.pointerId);
+if(ps.size==1){az-=(e.clientX-o[0])*.006;el=Math.max(-1.45,Math.min(1.45,el+(e.clientY-o[1])*.006))}
+ps.set(e.pointerId,[e.clientX,e.clientY]);if(ps.size==2){const[a,b]=[...ps.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);if(pd)dist=cl(dist*pd/d);pd=d}});
+const up=e=>{ps.delete(e.pointerId);pd=0};cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{e.preventDefault();dist=cl(dist*Math.exp(e.deltaY*.001))},{passive:false});
+function rs(){const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;rd.setPixelRatio(Math.min(devicePixelRatio,2));rd.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()}
+new ResizeObserver(rs).observe(cv);
+
+/* ---- AI scanner (simulated) ---- */
+let sd=7;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
+const TG=Array.from({length:44},(_,i)=>({lat:Math.asin(2*rnd()-1)/D,lon:rnd()*360-180,ty:i%3,hit:null}));
+const slog=[];
+function ang(a,b){const x=a.lat*D,y=b.lat*D;return Math.acos(Math.min(1,Math.sin(x)*Math.sin(y)+Math.cos(x)*Math.cos(y)*Math.cos((a.lon-b.lon)*D)))}
+function scanRun(t0,t1){const s=sats[sel];for(let t=t0;t<t1+1e-6;t+=5){const g=pos(s,t),q=geo(g,t),lm=swath(g.r-R);
+TG.forEach(o=>{if(o.hit)return;const d=ang(q,o);if(d<lm){const cf=Math.max(.5,Math.min(.99,.99-.32*d/lm-.05*rnd()));o.hit={c:cf,s:s.col};
+slog.unshift(TY[o.ty][0]+', confidence '+F(cf*100,0)+'%, T+'+fmt(t));if(slog.length>40)slog.pop()}})}}
+
+/* ---- map ---- */
+const mc=$('map'),mx=mc.getContext('2d');
+function drawMap(){const dp=Math.min(devicePixelRatio||1,2),w=mc.clientWidth,h=mc.clientHeight;if(mc.width!=Math.round(w*dp)){mc.width=Math.round(w*dp);mc.height=Math.round(h*dp)}
+mx.setTransform(dp,0,0,dp,0,0);const X=l=>(l+180)/360*w,Y=l=>(90-l)/180*h;
+mx.fillStyle='#10233a';mx.fillRect(0,0,w,h);mx.strokeStyle='rgba(150,190,230,.22)';mx.lineWidth=1;
+for(let i=1;i<12;i++){mx.beginPath();mx.moveTo(i*w/12,0);mx.lineTo(i*w/12,h);mx.stroke()}for(let i=1;i<6;i++){mx.beginPath();mx.moveTo(0,i*h/6);mx.lineTo(w,i*h/6);mx.stroke()}
+TG.forEach(o=>{mx.fillStyle=o.hit?TY[o.ty][1]:'#4a5d78';mx.beginPath();mx.arc(X(o.lon),Y(o.lat),o.hit?3.5:2,0,TP);mx.fill()});
+mx.fillStyle='#fff';mx.font='11px "IBM Plex Sans",sans-serif';ST.forEach(s=>{mx.fillRect(X(s[2])-2,Y(s[1])-2,4,4);mx.fillText(s[0],X(s[2])+5,Y(s[1])+3)});
+const s=sats[sel];mx.strokeStyle=s.col;mx.lineWidth=1.5;mx.beginPath();let pl=null;
+for(let t=T-2700;t<=T+2700;t+=45){const q=geo(pos(s,t),t);if(pl!==null&&Math.abs(q.lon-pl)>180)mx.moveTo(X(q.lon),Y(q.lat));else mx.lineTo(X(q.lon),Y(q.lat));pl=q.lon}mx.stroke();
+sats.forEach(v=>{const q=geo(pos(v,T),T);mx.fillStyle=v.col;mx.beginPath();mx.arc(X(q.lon),Y(q.lat),v==s?5:3.5,0,TP);mx.fill();
+if(v==s&&scan){const r=swath(pos(v,T).r-R)/D;mx.strokeStyle=v.col;mx.beginPath();mx.ellipse(X(q.lon),Y(q.lat),r/360*w,r/180*h,0,0,TP);mx.stroke()}})}
+
+/* ---- UI ---- */
+function chips(){$('chips').innerHTML='';sats.forEach((s,i)=>{const b=document.createElement('button');b.className='chip';b.setAttribute('aria-pressed',i==sel);
+b.innerHTML='<i style="background:'+s.col+'"></i>'+s.n;b.onclick=()=>{sel=i;sync()};$('chips').appendChild(b);s.m.scale.setScalar(i==sel?1.7:1)})}
+function sync(){const s=sats[sel];chips();$('ra').value=1000*Math.log(s.alt/200)/Math.log(180);$('ri').value=s.inc;$('re').value=s.e*1000;$('rs').value=1000*Math.log(spd)/Math.log(2000);
+$('oa').textContent=F(s.alt,0);$('oi').textContent=F(s.inc,1)+'°';$('oe').textContent=F(s.e,3);$('os').textContent='×'+F(spd,0);$('pz').textContent=paused?'Resume':'Pause';
+$('scan').checked=scan;pT=-1e9}
+$('ra').oninput=e=>{setEl(sats[sel],{alt:Math.round(200*Math.pow(180,e.target.value/1000))});sync()};
+$('ri').oninput=e=>{setEl(sats[sel],{inc:+e.target.value});sync()};
+$('re').oninput=e=>{setEl(sats[sel],{e:e.target.value/1000});sync()};
+$('rs').oninput=e=>{spd=Math.max(1,Math.round(Math.pow(2000,e.target.value/1000)));sync()};
+$('pz').onclick=()=>{paused=!paused;sync()};
+$('scan').onchange=e=>{scan=e.target.checked;sync()};
+Object.keys(PRE).forEach(k=>$('pre').add(new Option(k+' ('+F(PRE[k][0],0)+' km, '+PRE[k][1]+'°)',k)));
+ST.forEach((s,i)=>$('stSel').add(new Option(s[0],i)));$('stSel').onchange=e=>{stI=+e.target.value;pT=-1e9};
+$('add').onclick=()=>ACT.add_satellite({preset:$('pre').value});
+$('del').onclick=()=>ACT.remove_satellite({});
+const plan=h2=>{const r=hoh(R+sats[sel].alt,R+h2);return 'Total Δv '+F(r.dv,0)+' m/s, transfer time '+dur(r.t)};
+$('mc').onclick=()=>{$('mo').textContent=plan(+$('mh').value)};
+$('mg').onclick=()=>{$('mo').textContent=ACT.hohmann({target_altitude_km:+$('mh').value,execute:true}).message};
+
+let lu=0;
+function ui(){const s=sats[sel],g=pos(s,T),q=geo(g,T),a=R+s.alt;
+$('tT').textContent=fmt(T);$('tAlt').textContent=F(g.r-R,0)+' km';$('tV').textContent=F(g.v,2)+' km/s';$('tP').textContent=F(TP*Math.sqrt(a**3/MU)/60,1)+' min';
+$('tG').textContent=F(q.lat,1)+'°, '+F(q.lon,1)+'°';$('tSun').textContent=shadow(g.p)?'in Earth’s shadow':'in sunlight';
+if(T-pT>30||T<pT){pass=nextPass(s,ST[stI].u);pT=T}
+$('tPass').textContent=pass===null?'none in 24 h':pass<1?'visible now':'in '+dur(pass);
+const n=TG.filter(o=>o.hit).length;$('sinfo').textContent='Targets detected: '+n+' of '+TG.length+'. Swath at this altitude: '+F(swath(g.r-R)*R,0)+' km from the ground track.';
+$('slog').innerHTML=slog.slice(0,6).map(x=>'<li>'+x+'</li>').join('');drawMap()}
+
+/* ---- actions shared by the AI tools and the offline parser ---- */
+const cur=()=>sats[sel];
+function snap(){const s=cur(),g=pos(s,T);return{selected:s.n,satellites:sats.map(x=>({name:x.n,altitude_km:Math.round(x.alt),inclination_deg:+x.inc.toFixed(1),eccentricity:+x.e.toFixed(3)})),
+simulation_speed:spd,paused,scanner_on:scan,targets_detected:TG.filter(o=>o.hit).length,current_altitude_km:Math.round(g.r-R),velocity_km_s:+g.v.toFixed(2),
+period_min:+(TP*Math.sqrt((R+s.alt)**3/MU)/60).toFixed(1),in_earth_shadow:shadow(g.p),stations:ST.map(x=>x[0])}}
+const ok=m=>({message:m,state:snap()});
+const desc=s=>s.n+': '+F(s.alt,0)+' km, '+F(s.inc,1)+'°, e='+F(s.e,3);
+const ACT={
+get_state:()=>ok('State read.'),
+set_orbit:a=>{const o={};if(a.altitude_km!=null)o.alt=+a.altitude_km;if(a.inclination_deg!=null)o.inc=Math.max(0,Math.min(180,+a.inclination_deg));if(a.eccentricity!=null)o.e=+a.eccentricity;
+setEl(cur(),o);sync();return ok('Updated '+desc(cur()))},
+add_satellite:a=>{const p=PRE[a.preset]||[+a.altitude_km||800,+a.inclination_deg||0,+a.eccentricity||0];const s=mk(a.preset||a.name||'Custom',p[0],p[1],p[2]);
+sel=sats.indexOf(s);setEl(s,{});sync();return ok('Added '+desc(s))},
+remove_satellite:()=>{if(sats.length<2)return ok('Keep at least one satellite.');const s=sats.splice(sel,1)[0];sc.remove(s.m,s.l);sel=0;sync();return ok('Removed '+s.n+'.')},
+select_satellite:a=>{const i=sats.findIndex(s=>s.n.toLowerCase()==String(a.name).toLowerCase());if(i<0)return ok('No satellite with that name.');sel=i;sync();return ok('Selected '+sats[i].n+'.')},
+set_simulation:a=>{if(a.speed!=null)spd=Math.max(1,Math.min(2000,Math.round(+a.speed)));if(a.paused!=null)paused=!!a.paused;sync();return ok('Speed ×'+spd+(paused?', paused.':', running.'))},
+hohmann_transfer:a=>{const h=Math.max(200,Math.min(40000,+a.target_altitude_km)),r=plan(h);if(a.execute){setEl(cur(),{alt:h,e:0});sync();return ok(r+'. Applied; orbit is now circular at '+F(h,0)+' km.')}return ok(r+'. Not applied.')},
+next_pass:a=>{const i=ST.findIndex(x=>x[0].toLowerCase()==String(a.station).toLowerCase());if(i>=0){stI=i;$('stSel').value=i}pT=-1e9;ui();return ok(cur().n+' over '+ST[stI][0]+': '+$('tPass').textContent+' (elevation above 10°).')},
+set_scanner:a=>{scan=!!a.on;sync();return ok('Scanner '+(scan?'on':'off')+' for '+cur().n+'.')}};
+const sch=(p,req)=>({type:'object',properties:p,required:req||[]});
+const TOOLS=[
+['get_state','Read the current simulator state.',sch({})],
+['set_orbit','Change the selected satellite orbit. Altitude 200-40000 km, inclination 0-180 degrees, eccentricity 0-0.75.',sch({altitude_km:{type:'number'},inclination_deg:{type:'number'},eccentricity:{type:'number'}})],
+['add_satellite','Add a satellite: use a preset (ISS, GPS, GEO, SSO, Molniya) or give custom altitude_km, inclination_deg, eccentricity and name.',sch({preset:{type:'string',enum:Object.keys(PRE)},name:{type:'string'},altitude_km:{type:'number'},inclination_deg:{type:'number'},eccentricity:{type:'number'}})],
+['remove_satellite','Remove the selected satellite.',sch({})],
+['select_satellite','Select a satellite by name.',sch({name:{type:'string'}},['name'])],
+['set_simulation','Set simulation speed (1-2000) and/or pause or resume.',sch({speed:{type:'number'},paused:{type:'boolean'}})],
+['hohmann_transfer','Compute a Hohmann transfer to a circular orbit and optionally apply it.',sch({target_altitude_km:{type:'number'},execute:{type:'boolean'}},['target_altitude_km'])],
+['next_pass','Time until the selected satellite is next above 10 degrees elevation over a ground station.',sch({station:{type:'string',enum:ST.map(x=>x[0])}},['station'])],
+['set_scanner','Turn the simulated onboard AI scanner on or off for the selected satellite.',sch({on:{type:'boolean'}},['on'])]
+].map(([n,d,s])=>({name:n,description:d,inputSchema:s,execute:a=>ACT[n](a||{})}));
+
+/* ---- assistant ---- */
+function say(c,t){const d=document.createElement('div');d.className=c;d.textContent=t;$('chat').appendChild(d);$('chat').scrollTop=1e9;return d}
+function local(q){const t=q.toLowerCase();let m;
+if(/help/.test(t))return 'Offline commands: “altitude 800”, “inclination 98”, “eccentricity 0.2”, “speed 500”, “add GPS” (ISS, GEO, SSO, Molniya), “remove”, “pause”, “play”, “transfer to 1200”, “pass over Baikonur”, “scanner on”.';
+if(m=t.match(/(transfer|hohmann)\D*(\d+)/))return ACT.hohmann_transfer({target_altitude_km:+m[2],execute:true}).message;
+if(m=t.match(/(add|create)\D*?(iss|gps|geo|sso|molniya)/))return ACT.add_satellite({preset:Object.keys(PRE).find(k=>k.toLowerCase()==m[2])}).message;
+if(/remove|delete/.test(t))return ACT.remove_satellite().message;
+if(/pass|when/.test(t)){const i=ST.findIndex(x=>t.includes(x[0].toLowerCase()));return ACT.next_pass({station:i>=0?ST[i][0]:ST[stI][0]}).message}
+if(/scan/.test(t))return ACT.set_scanner({on:/\b(off|disable|stop)\b/.test(t)?false:/\b(on|enable|start)\b/.test(t)?true:!scan}).message;
+if(/pause|stop/.test(t))return ACT.set_simulation({paused:true}).message;
+if(/play|resume|start/.test(t))return ACT.set_simulation({paused:false}).message;
+const o={},v={};
+if(m=t.match(/(altitude|alt)\D{0,14}?(\d+(?:\.\d+)?)/))o.altitude_km=+m[2];
+if(m=t.match(/(inclination|inc)\D{0,14}?(\d+(?:\.\d+)?)/))o.inclination_deg=+m[2];
+if(m=t.match(/(eccentricity|ecc)\D{0,14}?(\d*\.?\d+)/))o.eccentricity=+m[2];
+if(m=t.match(/(speed|faster)\D{0,14}?(\d+)/))v.speed=+m[2];
+if(Object.keys(v).length)ACT.set_simulation(v);
+if(Object.keys(o).length)return ACT.set_orbit(o).message;
+if(Object.keys(v).length)return 'Speed ×'+spd+'.';
+return 'I did not understand that. Type “help” for examples.'}
+const hist=[];
+const INS=()=>'You are the assistant inside a satellite orbit simulator. Use the tools to change or read the simulation, then answer in English in at most three short sentences. Do not claim an action happened unless a tool succeeded. Current state: '+JSON.stringify(snap())+'\n\nUser request: ';
+$('cf').onsubmit=async e=>{e.preventDefault();const q=$('cq').value.trim();if(!q)return;$('cq').value='';say('u',q);
+if(!sample){say('',local(q));return}
+const b=say('','…');$('cb').disabled=true;
+try{const r=await sample([...hist,{role:'user',content:INS()+q}],{tools:TOOLS,cache:false,modelTier:'quick',onText:({text})=>{b.textContent=text}});
+b.textContent=r.text||'Done.';hist.push({role:'user',content:q},{role:'assistant',content:b.textContent});if(hist.length>12)hist.splice(0,2)}
+catch(err){if(err&&err.code=='not_granted'){sample=null;$('ai').textContent='AI: permission declined, using offline commands only.'}
+b.textContent=(err&&err.code=='rate_limited')?'Too many requests. Try again in a moment.':local(q)}
+$('cb').disabled=false};
+say('','Hi! Tell me what to change in the simulation, in your own words. Type “help” for examples.');
+(async()=>{try{sample=window.claude&&await window.claude.use('sample')}catch(e){sample=null}
+$('ai').textContent=sample?'AI: Claude (answers may take a few seconds, the first message asks for permission).':'AI: unavailable here, using built-in commands only.'})();
+
+/* ---- start ---- */
+mk('ISS',420,51.6,.0005);mk('GPS',20180,55,.01);mk('SSO',700,98.2,0);sel=0;sync();
+let last=performance.now();
+function tick(now){const dt=Math.min((now-last)/1000,.1);last=now;
+if(!paused){const t0=T;T+=dt*spd;if(scan)scanRun(t0,T)}
+sats.forEach(s=>{const p=pos(s,T).p;s.m.position.set(p[0]/R,p[2]/R,-p[1]/R)});
+earth.rotation.y=W*T;cam.position.set(dist*Math.cos(el)*Math.sin(az),dist*Math.sin(el),dist*Math.cos(el)*Math.cos(az));cam.lookAt(0,0,0);rd.render(sc,cam);
+if(now-lu>120){lu=now;ui()}requestAnimationFrame(tick)}
+rs();requestAnimationFrame(tick);
+</script></body></html>
